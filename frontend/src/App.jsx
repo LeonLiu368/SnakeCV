@@ -20,8 +20,9 @@ const HEAD_DIRECTIONS = {
   LEFT: { x: -1, y: 0 },
   RIGHT: { x: 1, y: 0 },
 }
-const NOSE_THRESHOLD = 0.05
+const NOSE_THRESHOLD = 0.08
 const NOSE_INDEX = 1
+const NOSE_SMOOTHING = 1.0
 
 const randomFood = (snake) => {
   const occupied = new Set(snake.map((seg) => `${seg.x},${seg.y}`))
@@ -52,6 +53,7 @@ function App() {
   const queuedDirection = useRef(direction)
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
+  const smoothedNoseRef = useRef(null)
 
   const boardCells = useMemo(
     () => Array.from({ length: GRID_SIZE * GRID_SIZE }),
@@ -125,11 +127,12 @@ function App() {
             )
             if (result.faceLandmarks && result.faceLandmarks.length) {
               const nose = result.faceLandmarks[0][NOSE_INDEX]
-              const direction = noseDirection(nose)
+              const smoothNose = smoothPoint(nose)
+              const direction = noseDirection(smoothNose)
               const mirrored =
                 direction === 'LEFT' ? 'RIGHT' : direction === 'RIGHT' ? 'LEFT' : direction
               setHeadDirection(mirrored)
-              drawOverlay(nose, mirrored, true)
+              drawOverlay(smoothNose, mirrored, true)
               setCameraStatus('Face detected')
               if (direction) {
                 const next = HEAD_DIRECTIONS[mirrored]
@@ -164,6 +167,20 @@ function App() {
         return dx > 0 ? 'RIGHT' : 'LEFT'
       }
       return dy > 0 ? 'DOWN' : 'UP'
+    }
+
+    const smoothPoint = (point) => {
+      const prev = smoothedNoseRef.current
+      if (!prev) {
+        smoothedNoseRef.current = { x: point.x, y: point.y }
+        return smoothedNoseRef.current
+      }
+      const next = {
+        x: prev.x + (point.x - prev.x) * NOSE_SMOOTHING,
+        y: prev.y + (point.y - prev.y) * NOSE_SMOOTHING,
+      }
+      smoothedNoseRef.current = next
+      return next
     }
 
     const clearOverlay = () => {
@@ -214,6 +231,7 @@ function App() {
         cancelAnimationFrame(animationId)
       }
       setHeadDirection(null)
+      smoothedNoseRef.current = null
       if (videoRef.current?.srcObject) {
         videoRef.current.srcObject.getTracks().forEach((track) => track.stop())
       }
