@@ -20,7 +20,7 @@ const HEAD_DIRECTIONS = {
   LEFT: { x: -1, y: 0 },
   RIGHT: { x: 1, y: 0 },
 }
-const NOSE_THRESHOLD = 0.08
+const NOSE_THRESHOLD = 0.05
 const NOSE_INDEX = 1
 
 const randomFood = (snake) => {
@@ -48,8 +48,10 @@ function App() {
   const [best, setBest] = useState(0)
   const [status, setStatus] = useState('Press Start')
   const [cameraStatus, setCameraStatus] = useState('Initializing camera…')
+  const [headDirection, setHeadDirection] = useState(null)
   const queuedDirection = useRef(direction)
   const videoRef = useRef(null)
+  const canvasRef = useRef(null)
 
   const boardCells = useMemo(
     () => Array.from({ length: GRID_SIZE * GRID_SIZE }),
@@ -89,7 +91,7 @@ function App() {
     const setup = async () => {
       try {
         const vision = await FilesetResolver.forVisionTasks(
-          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm'
+          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
         )
         landmarker = await FaceLandmarker.createFromOptions(vision, {
           baseOptions: {
@@ -106,11 +108,17 @@ function App() {
         if (!videoRef.current) return
         videoRef.current.srcObject = stream
         await videoRef.current.play()
+        videoRef.current.style.transform = 'scaleX(-1)'
         setCameraStatus('Head tracking active')
 
         const loop = () => {
           if (!active || !videoRef.current) return
           if (videoRef.current.readyState >= 2 && landmarker) {
+            const canvas = canvasRef.current
+            if (canvas && videoRef.current.videoWidth && videoRef.current.videoHeight) {
+              canvas.width = videoRef.current.videoWidth
+              canvas.height = videoRef.current.videoHeight
+            }
             const result = landmarker.detectForVideo(
               videoRef.current,
               performance.now()
@@ -118,13 +126,22 @@ function App() {
             if (result.faceLandmarks && result.faceLandmarks.length) {
               const nose = result.faceLandmarks[0][NOSE_INDEX]
               const direction = noseDirection(nose)
+              const mirrored =
+                direction === 'LEFT' ? 'RIGHT' : direction === 'RIGHT' ? 'LEFT' : direction
+              setHeadDirection(mirrored)
+              drawOverlay(nose, mirrored, true)
+              setCameraStatus('Face detected')
               if (direction) {
-                const next = HEAD_DIRECTIONS[direction]
+                const next = HEAD_DIRECTIONS[mirrored]
                 const current = queuedDirection.current
                 if (!(current.x + next.x === 0 && current.y + next.y === 0)) {
                   queuedDirection.current = next
                 }
               }
+            } else {
+              setHeadDirection(null)
+              clearOverlay()
+              setCameraStatus('No face detected')
             }
           }
           animationId = requestAnimationFrame(loop)
@@ -149,6 +166,46 @@ function App() {
       return dy > 0 ? 'DOWN' : 'UP'
     }
 
+    const clearOverlay = () => {
+      const canvas = canvasRef.current
+      if (!canvas) return
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+    }
+
+    const drawOverlay = (nose, direction, mirror) => {
+      const canvas = canvasRef.current
+      if (!canvas) return
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      const cx = (mirror ? 1 - nose.x : nose.x) * canvas.width
+      const cy = nose.y * canvas.height
+      ctx.fillStyle = 'rgba(126, 240, 193, 0.9)'
+      ctx.beginPath()
+      ctx.arc(cx, cy, 6, 0, Math.PI * 2)
+      ctx.fill()
+      if (!direction) return
+      const arrowLen = 120
+      let ex = cx
+      let ey = cy
+      if (direction === 'RIGHT') ex += arrowLen
+      if (direction === 'LEFT') ex -= arrowLen
+      if (direction === 'UP') ey -= arrowLen
+      if (direction === 'DOWN') ey += arrowLen
+      ctx.strokeStyle = 'rgba(255, 211, 106, 0.95)'
+      ctx.lineWidth = 4
+      ctx.lineCap = 'round'
+      ctx.beginPath()
+      ctx.moveTo(cx, cy)
+      ctx.lineTo(ex, ey)
+      ctx.stroke()
+      ctx.fillStyle = 'rgba(255, 211, 106, 0.95)'
+      ctx.font = '18px Manrope, sans-serif'
+      ctx.fillText(direction, cx - 24, cy + 28)
+    }
+
     setup()
 
     return () => {
@@ -156,6 +213,7 @@ function App() {
       if (animationId) {
         cancelAnimationFrame(animationId)
       }
+      setHeadDirection(null)
       if (videoRef.current?.srcObject) {
         videoRef.current.srcObject.getTracks().forEach((track) => track.stop())
       }
@@ -269,7 +327,11 @@ function App() {
         <div className="camera-panel">
           <div className="camera-frame">
             <video ref={videoRef} muted playsInline />
+            <canvas ref={canvasRef} />
             <p className="camera-status">{cameraStatus}</p>
+            {headDirection ? (
+              <p className="camera-direction">{headDirection}</p>
+            ) : null}
           </div>
         </div>
       </main>
