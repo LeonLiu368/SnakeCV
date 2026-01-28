@@ -61,6 +61,7 @@ function App() {
   const smoothedNoseRef = useRef(null)
   const faceEnabledRef = useRef(faceEnabled)
   const lastDirectionRef = useRef(0)
+  const baselineNoseRef = useRef(null)
 
   const boardCells = useMemo(
     () => Array.from({ length: GRID_SIZE * GRID_SIZE }),
@@ -147,7 +148,14 @@ function App() {
             )
             if (result.faceLandmarks && result.faceLandmarks.length) {
               const nose = result.faceLandmarks[0][NOSE_INDEX]
-              const smoothNose = smoothPoint(nose)
+              if (!baselineNoseRef.current) {
+                baselineNoseRef.current = { x: nose.x, y: nose.y }
+              }
+              const calibrated = {
+                x: nose.x - baselineNoseRef.current.x + 0.5,
+                y: nose.y - baselineNoseRef.current.y + 0.5,
+              }
+              const smoothNose = smoothPoint(calibrated)
               const direction = noseDirection(smoothNose)
               const mirrored =
                 direction === 'LEFT' ? 'RIGHT' : direction === 'RIGHT' ? 'LEFT' : direction
@@ -173,6 +181,7 @@ function App() {
             } else {
               setHeadDirection(null)
               setNoseOffset({ x: 0, y: 0 })
+              baselineNoseRef.current = null
               clearOverlay()
               setCameraStatus('No face detected')
             }
@@ -266,6 +275,7 @@ function App() {
     if (!faceEnabled) {
       setHeadDirection(null)
       clearOverlay()
+      baselineNoseRef.current = null
     }
   }, [clearOverlay, faceEnabled])
 
@@ -314,6 +324,7 @@ function App() {
       if (status === 'Game Over') {
         reset()
       }
+      baselineNoseRef.current = null
       setRunning(true)
       setStatus('Running')
       setRestartPulse(true)
