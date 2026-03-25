@@ -24,6 +24,12 @@ const GAMES = [
 export function LandingPage() {
   return (
     <div className="landing">
+      <div className="landing-atmosphere" aria-hidden="true">
+        <span className="landing-bubble landing-bubble--1" />
+        <span className="landing-bubble landing-bubble--2" />
+        <span className="landing-bubble landing-bubble--3" />
+        <span className="landing-bubble landing-bubble--4" />
+      </div>
       <header className="landing-header">
         <Link to="/" className="landing-brand-link">
           <h1 className="landing-brand">CVified</h1>
