@@ -623,6 +623,45 @@ body {
   font-size: 0.8rem;
 }
 
+.slither-kill-toast {
+  position: absolute;
+  top: 22%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8;
+  max-width: min(90%, 320px);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-pill);
+  font-family: 'Inter', 'DM Sans', system-ui, sans-serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-align: center;
+  color: #0d0d0d;
+  background: linear-gradient(135deg, #ffd54a 0%, #66c0f4 100%);
+  box-shadow:
+    0 8px 28px rgba(0, 0, 0, 0.45),
+    0 0 0 2px rgba(255, 255, 255, 0.25) inset;
+  animation: slither-toast-pop 0.45s cubic-bezier(0.34, 1.45, 0.64, 1) both;
+  pointer-events: none;
+}
+
+@keyframes slither-toast-pop {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.85) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) scale(1) translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slither-kill-toast {
+    animation: none;
+  }
+}
+
 .slither-calibration-overlay {
   position: absolute;
   inset: 0;

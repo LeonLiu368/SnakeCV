@@ -14,9 +14,10 @@ const PLAYER_TURN_RATE = 3
 const DEATH_ANIM_MS = 1200
 const BOOST_BASE_DURATION_MS = 2000
 const BOOST_DURATION_PER_SCORE_MS = 50
-const BOOST_SPEED_MULTIPLIER = 1.5
+const BOOST_SPEED_MULTIPLIER = 1.62
 const BOOST_COOLDOWN_MS = 5000
 const CALIBRATION_DELAY_SEC = 2
+const ELIMINATION_TOAST_MS = 2200
 
 function normalizeAngle(a) {
   while (a > Math.PI) a -= 2 * Math.PI
@@ -50,9 +51,27 @@ export function SlitherPage() {
   const speedBoostCooldownEndTimeRef = useRef(null)
   speedBoostCooldownEndTimeRef.current = speedBoostCooldownEndTime
   const [cooldownRemainingSec, setCooldownRemainingSec] = useState(null)
+  const [killToast, setKillToast] = useState(/** @type {{ text: string, id: number } | null} */ (null))
+  const cameraShakeRef = useRef({ x: 0, y: 0 })
 
   const handleAngleChange = useCallback((angle) => {
     playerCVAngleRef.current = angle
+  }, [])
+
+  const tryStartBoost = useCallback(() => {
+    const now = Date.now()
+    if (speedBoostCooldownEndTimeRef.current != null && now < speedBoostCooldownEndTimeRef.current) return
+    if (speedBoostEndTimeRef.current != null && now < speedBoostEndTimeRef.current) return
+    const playerSnake = stateRef.current.snakes.find((s) => s.isPlayer)
+    if (!playerSnake) return
+    const scoreDuration = playerSnake.segments.length * BOOST_DURATION_PER_SCORE_MS
+    const duration = BOOST_BASE_DURATION_MS + scoreDuration
+    const start = now
+    const end = now + duration
+    speedBoostStartTimeRef.current = start
+    speedBoostEndTimeRef.current = end
+    setSpeedBoostStartTime(start)
+    setSpeedBoostEndTime(end)
   }, [])
 
   const {
@@ -71,22 +90,7 @@ export function SlitherPage() {
   } = useHeadTracking({
     faceEnabled,
     onAngleChange: handleAngleChange,
-    onMouthOpen: useCallback(() => {
-      const now = Date.now()
-      if (speedBoostCooldownEndTimeRef.current != null && now < speedBoostCooldownEndTimeRef.current) return
-      if (speedBoostEndTimeRef.current != null && now < speedBoostEndTimeRef.current) return
-      // No stacking: do not extend or replace an active boost
-      const playerSnake = stateRef.current.snakes.find((s) => s.isPlayer)
-      if (!playerSnake) return
-      const scoreDuration = playerSnake.segments.length * BOOST_DURATION_PER_SCORE_MS
-      const duration = BOOST_BASE_DURATION_MS + scoreDuration
-      const start = now
-      const end = now + duration
-      speedBoostStartTimeRef.current = start
-      speedBoostEndTimeRef.current = end
-      setSpeedBoostStartTime(start)
-      setSpeedBoostEndTime(end)
-    }, []),
+    onMouthOpen: tryStartBoost,
     sensitivity,
   })
 
@@ -124,6 +128,10 @@ export function SlitherPage() {
       } else if (e.key === 'ArrowRight') {
         if (e.type === 'keydown') playerTurn.current = 1
         else if (playerTurn.current === 1) playerTurn.current = 0
+      } else if (e.type === 'keydown' && (e.code === 'Space' || e.code === 'ShiftLeft' || e.code === 'ShiftRight')) {
+        if (e.code === 'Space' && e.repeat) return
+        e.preventDefault()
+        tryStartBoost()
       }
     }
     window.addEventListener('keydown', handleKey)
@@ -132,12 +140,18 @@ export function SlitherPage() {
       window.removeEventListener('keydown', handleKey)
       window.removeEventListener('keyup', handleKey)
     }
-  }, [])
+  }, [tryStartBoost])
 
   useEffect(() => {
     if (!running) return
     let raf = 0
     const loop = () => {
+      cameraShakeRef.current = {
+        x: cameraShakeRef.current.x * 0.88,
+        y: cameraShakeRef.current.y * 0.88,
+      }
+      if (Math.abs(cameraShakeRef.current.x) < 0.35) cameraShakeRef.current.x = 0
+      if (Math.abs(cameraShakeRef.current.y) < 0.35) cameraShakeRef.current.y = 0
       const now = performance.now() / 1000
       let dt = now - lastTime.current
       lastTime.current = now
@@ -222,6 +236,27 @@ export function SlitherPage() {
             : null
         })
         .filter(Boolean)
+      if (newBotDeads.length > 0) {
+        const totalSegs = newBotDeads.reduce(
+          (sum, b) => sum + b.snake.segments.length,
+          0,
+        )
+        cameraShakeRef.current = {
+          x: (Math.random() - 0.5) * 22,
+          y: (Math.random() - 0.5) * 22,
+        }
+        const tid = tickTimeMs
+        setKillToast({
+          text:
+            newBotDeads.length === 1
+              ? `Eliminated! +${totalSegs} mass on the map`
+              : `${newBotDeads.length} rivals down! +${totalSegs} mass`,
+          id: tid,
+        })
+        window.setTimeout(() => {
+          setKillToast((t) => (t?.id === tid ? null : t))
+        }, ELIMINATION_TOAST_MS)
+      }
       setBotDeadSnakes((prev) => [
         ...prev.filter((b) => tickTimeMs - b.startTime < DEATH_ANIM_MS),
         ...newBotDeads,
@@ -322,6 +357,9 @@ export function SlitherPage() {
         <SlitherView
           state={state}
           onMouseMove={handleMouseMove}
+          onCanvasBoost={tryStartBoost}
+          cameraShakeX={cameraShakeRef.current.x}
+          cameraShakeY={cameraShakeRef.current.y}
           playerDeadSnake={playerDeadSnake}
           deathAnimationProgress={deathAnimationProgress}
           botDeadSnakes={botDeadSnakes}
@@ -378,8 +416,10 @@ export function SlitherPage() {
           <h2 className="slither-leaderboard-title">Length</h2>
           <p className="slither-speed-boost-cooldown" aria-live="polite">
             {cooldownRemainingSec != null
-              ? `Speed boost: ${cooldownRemainingSec}s`
-              : 'Speed boost: Ready'}
+              ? `Boost recharging: ${cooldownRemainingSec}s`
+              : speedBoostActive
+                ? 'Boost: ON (dropping trail—re-eat the blue dots!)'
+                : 'Boost: Ready (Space / Shift / click / mouth)'}
           </p>
           {(() => {
             const playerSnake = state.snakes.find((s) => s.isPlayer)
@@ -470,6 +510,16 @@ export function SlitherPage() {
             ))}
           </ol>
         </aside>
+        {killToast ? (
+          <div
+            className="slither-kill-toast"
+            role="status"
+            aria-live="polite"
+            key={killToast.id}
+          >
+            {killToast.text}
+          </div>
+        ) : null}
         {calibrationCountdown != null && calibrationCountdown > 0 ? (
           <div
             className="slither-calibration-overlay"
@@ -589,7 +639,9 @@ export function SlitherPage() {
         </div>
       </ResizableCameraPanel>
       <p className="slither-controls-hint">
-        Move mouse or use your face to steer. Arrow keys to turn. Avoid other snakes and walls.
+        Steer with mouse or face. Arrow keys to turn. <strong>Space</strong>, <strong>Shift</strong>, or{' '}
+        <strong>click the map</strong> to boost (uses length like Slither.io—grab the blue trail pellets!).
+        Hunt big gold orbs for a huge growth spike. Cut off rivals to scoop their mass.
       </p>
     </div>
   )

@@ -32,14 +32,22 @@ export const GHOST_DURATION = 4
 export const MAGNET_DURATION = 5
 /** Magnet radius multiplier when super-magnet power-up is active. */
 export const SUPER_MAGNET_MULTIPLIER = 2
+/** Segments shed per second while boosting (Slither.io-style mass trail). */
+export const BOOST_SHED_SEGMENTS_PER_SEC = 7
+/** Do not shrink player below this many segments while boosting. */
+export const MIN_PLAYER_SEGMENTS_FOR_BOOST_DRAIN = 42
+/** Rare high-value pellet (like Slither “special” food). */
+export const GOLDEN_PELLET_VALUE = 12
+/** Chance a spawned normal-cycle pellet is golden instead of regular. */
+export const GOLDEN_SPAWN_CHANCE = 0.045
 
 /**
  * @typedef {{ x: number, y: number }} Point
- * @typedef {'normal' | 'shield' | 'ghost' | 'magnet'} PelletType
+ * @typedef {'normal' | 'shield' | 'ghost' | 'magnet' | 'trail' | 'golden'} PelletType
  * @typedef {{ id: string, segments: Point[], angle: number, speed: number, turnSpeed: number, color: string, isPlayer?: boolean, shield?: boolean, ghostUntil?: number, magnetUntil?: number }} Snake
  * @typedef {{ x: number, y: number, value: number, type?: PelletType }} Pellet
  * @typedef {{ width: number, height: number }} Bounds
- * @typedef {{ snakes: Snake[], pellets: Pellet[], bounds: Bounds, nextSnakeId: number, nextPelletSpawn: number, gameTime?: number }} GameState
+ * @typedef {{ snakes: Snake[], pellets: Pellet[], bounds: Bounds, nextSnakeId: number, nextPelletSpawn: number, gameTime?: number, playerBoostShedAcc?: number }} GameState
  */
 
 /**
@@ -133,6 +141,7 @@ export function createInitialState(options = {}) {
     nextSnakeId: numBots,
     nextPelletSpawn: PELLET_SPAWN_INTERVAL,
     gameTime: 0,
+    playerBoostShedAcc: 0,
   }
 }
 
@@ -252,6 +261,42 @@ function headHitsBody(snakeId, head, allSnakes, bounds, gameTime) {
 }
 
 /**
+ * While boosting, drop trail pellets from the tail and shrink the player (Slither.io-style).
+ * @param {Snake[]} snakes
+ * @param {Pellet[]} pellets
+ * @param {number} dt
+ * @param {number} playerSpeedMultiplier
+ * @param {number} boostShedAcc
+ * @returns {{ snakes: Snake[], pellets: Pellet[], boostShedAcc: number }}
+ */
+function applyPlayerBoostDrain(snakes, pellets, dt, playerSpeedMultiplier, boostShedAcc) {
+  if (playerSpeedMultiplier <= 1) {
+    return { snakes, pellets, boostShedAcc }
+  }
+  let acc = (boostShedAcc ?? 0) + dt * BOOST_SHED_SEGMENTS_PER_SEC
+  const playerIdx = snakes.findIndex((s) => s.isPlayer)
+  if (playerIdx < 0) {
+    return { snakes, pellets, boostShedAcc: acc }
+  }
+  let player = snakes[playerIdx]
+  const nextPellets = [...pellets]
+  const nextSnakes = [...snakes]
+  while (acc >= 1 && player.segments.length > MIN_PLAYER_SEGMENTS_FOR_BOOST_DRAIN) {
+    acc -= 1
+    const tail = player.segments[player.segments.length - 1]
+    nextPellets.push({
+      x: tail.x,
+      y: tail.y,
+      value: 1,
+      type: 'trail',
+    })
+    player = { ...player, segments: player.segments.slice(0, -1) }
+  }
+  nextSnakes[playerIdx] = player
+  return { snakes: nextSnakes, pellets: nextPellets, boostShedAcc: acc }
+}
+
+/**
  * Apply target angles from bot AI and move all snakes.
  * @param {GameState} state
  * @param {number} dt
@@ -279,6 +324,17 @@ export function tick(state, dt, targetAngles = {}, options = {}) {
     return result
   })
 
+  const drained = applyPlayerBoostDrain(
+    snakes,
+    pellets,
+    dt,
+    playerSpeedMultiplier,
+    state.playerBoostShedAcc ?? 0,
+  )
+  snakes = drained.snakes
+  pellets = drained.pellets
+  const playerBoostShedAcc = drained.boostShedAcc
+
   const baseCollectRadius = HEAD_RADIUS + PELLET_RADIUS + MAGNET_RADIUS
   const collectedIndices = new Set()
   snakes = snakes.map((snake) => {
@@ -299,7 +355,9 @@ export function tick(state, dt, targetAngles = {}, options = {}) {
       if (ptype === 'shield') shield = true
       else if (ptype === 'ghost') ghostUntil = gameTime + GHOST_DURATION
       else if (ptype === 'magnet') magnetUntil = gameTime + MAGNET_DURATION
-      else lengthGain += pellet.value
+      else if (ptype === 'normal' || ptype === 'trail' || ptype === 'golden') {
+        lengthGain += pellet.value
+      }
     }
     const needsUpdate =
       lengthGain > 0 ||
@@ -359,12 +417,23 @@ export function tick(state, dt, targetAngles = {}, options = {}) {
   nextPelletSpawn -= dt
   if (nextPelletSpawn <= 0) {
     nextPelletSpawn = PELLET_SPAWN_INTERVAL
-    const isPowerUp = Math.random() < POWERUP_SPAWN_CHANCE
-    const type = isPowerUp ? POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)] : 'normal'
+    const roll = Math.random()
+    let type
+    let value
+    if (roll < POWERUP_SPAWN_CHANCE) {
+      type = POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)]
+      value = 1
+    } else if (roll < POWERUP_SPAWN_CHANCE + GOLDEN_SPAWN_CHANCE) {
+      type = 'golden'
+      value = GOLDEN_PELLET_VALUE
+    } else {
+      type = 'normal'
+      value = PELLET_VALUE
+    }
     pellets.push({
       x: minX + Math.random() * (maxX - minX),
       y: minY + Math.random() * (maxY - minY),
-      value: type === 'normal' ? PELLET_VALUE : 1,
+      value,
       type,
     })
   }
@@ -376,6 +445,7 @@ export function tick(state, dt, targetAngles = {}, options = {}) {
       pellets,
       nextPelletSpawn,
       gameTime,
+      playerBoostShedAcc,
     },
     deadIds: [...deadIds],
   }

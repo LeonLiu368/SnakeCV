@@ -334,7 +334,19 @@ function unwrapFocus(focus, prev, w, h) {
 
 const POWERUP_ICON_URLS = { shield: shieldPowerupIcon, ghost: ghostPowerupIcon, magnet: magnetPowerupIcon }
 
-export function SlitherView({ state, onMouseMove, playerDeadSnake, deathAnimationProgress, botDeadSnakes = [], deathAnimMs = 1200, speedBoostActive, speedBoostProgress }) {
+export function SlitherView({
+  state,
+  onMouseMove,
+  onCanvasBoost,
+  playerDeadSnake,
+  deathAnimationProgress,
+  botDeadSnakes = [],
+  deathAnimMs = 1200,
+  speedBoostActive,
+  speedBoostProgress,
+  cameraShakeX = 0,
+  cameraShakeY = 0,
+}) {
   const canvasRef = useRef(null)
   const minimapRef = useRef(null)
   const wrapRef = useRef(null)
@@ -444,10 +456,13 @@ export function SlitherView({ state, onMouseMove, playerDeadSnake, deathAnimatio
     ctx.fillStyle = '#0d0d0d'
     ctx.fillRect(0, 0, canvas.width, canvas.height)
 
+    ctx.translate(cameraShakeX, cameraShakeY)
     ctx.translate(camX, camY)
     ctx.scale(scale, scale)
 
-    const pelletPulse = 1 + 0.08 * Math.sin((performance.now() / 1000) * Math.PI)
+    const tNow = performance.now() / 1000
+    const pelletPulse = 1 + 0.08 * Math.sin(tNow * Math.PI)
+    const goldenPulse = 1 + 0.12 * Math.sin(tNow * Math.PI * 2.2)
     const toroidalOffsets = [
       { x: 0, y: 0 },
       { x: -w, y: 0 },
@@ -502,20 +517,70 @@ export function SlitherView({ state, onMouseMove, playerDeadSnake, deathAnimatio
             ? toroidalDrawPositions(pellet.x, pellet.y, bounds)
             : [[pellet.x, pellet.y]]
         const ptype = pellet.type ?? 'normal'
+        const isGolden = ptype === 'golden'
+        const isTrail = ptype === 'trail'
         const isPowerUp = ptype === 'shield' || ptype === 'ghost' || ptype === 'magnet'
         const powerUpStyle = isPowerUp ? POWERUP_STYLE[ptype] : null
-        const sizeScale = isPowerUp ? 1.25 : 1
+        const sizeScale = isPowerUp ? 1.25 : isGolden ? 1.5 : isTrail ? 0.72 : 1
         const usePull = offset.x === 0 && offset.y === 0
         const powerupImgs = powerupImagesRef.current
         const powerupImg = isPowerUp ? powerupImgs[ptype] : null
         const usePowerupIcon = isPowerUp && powerupImg && powerupImagesReady
+        const pulseForPellet = isGolden ? goldenPulse : pelletPulse
         for (const [px, py] of positions) {
           const drawX = usePull ? px + pullX : px
           const drawY = usePull ? py + pullY : py
-          const r = PELLET_RADIUS * sizeScale * pelletPulse * sizeMult
+          const r = PELLET_RADIUS * sizeScale * pulseForPellet * sizeMult
           ctx.save()
           ctx.globalAlpha = alpha
-          if (usePowerupIcon) {
+          if (isGolden) {
+            const highlightOffset = r * ORB_HIGHLIGHT_OFFSET
+            const cx = drawX - highlightOffset
+            const cy = drawY - highlightOffset
+            ctx.shadowColor = 'rgba(255, 215, 80, 0.95)'
+            ctx.shadowBlur = (ORB_GLOW_BLUR * 1.8 * sizeMult) / scale
+            const orbGrad = ctx.createRadialGradient(cx, cy, 0, drawX, drawY, r)
+            orbGrad.addColorStop(0, 'rgba(255, 255, 255, 1)')
+            orbGrad.addColorStop(0.2, 'rgba(255, 248, 200, 1)')
+            orbGrad.addColorStop(0.5, 'rgba(255, 200, 60, 1)')
+            orbGrad.addColorStop(0.85, 'rgba(220, 140, 20, 1)')
+            orbGrad.addColorStop(1, 'rgba(180, 90, 30, 1)')
+            ctx.fillStyle = orbGrad
+            ctx.beginPath()
+            ctx.arc(drawX, drawY, r, 0, Math.PI * 2)
+            ctx.fill()
+            ctx.strokeStyle = 'rgba(255, 255, 220, 0.85)'
+            ctx.lineWidth = 2.2 / scale
+            ctx.beginPath()
+            ctx.arc(drawX, drawY, r, 0, Math.PI * 2)
+            ctx.stroke()
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
+            ctx.beginPath()
+            ctx.arc(cx - r * 0.12, cy - r * 0.12, r * 0.22, 0, Math.PI * 2)
+            ctx.fill()
+            ctx.shadowBlur = 0
+          } else if (isTrail) {
+            const highlightOffset = r * ORB_HIGHLIGHT_OFFSET
+            const cx = drawX - highlightOffset
+            const cy = drawY - highlightOffset
+            ctx.shadowColor = 'rgba(80, 200, 255, 0.5)'
+            ctx.shadowBlur = (ORB_GLOW_BLUR * 0.45 * sizeMult) / scale
+            const orbGrad = ctx.createRadialGradient(cx, cy, 0, drawX, drawY, r)
+            orbGrad.addColorStop(0, 'rgba(200, 245, 255, 1)')
+            orbGrad.addColorStop(0.35, 'rgba(100, 200, 255, 0.95)')
+            orbGrad.addColorStop(0.75, 'rgba(40, 140, 220, 0.9)')
+            orbGrad.addColorStop(1, 'rgba(20, 80, 160, 0.85)')
+            ctx.fillStyle = orbGrad
+            ctx.beginPath()
+            ctx.arc(drawX, drawY, r, 0, Math.PI * 2)
+            ctx.fill()
+            ctx.strokeStyle = 'rgba(180, 230, 255, 0.45)'
+            ctx.lineWidth = 0.8 / scale
+            ctx.beginPath()
+            ctx.arc(drawX, drawY, r, 0, Math.PI * 2)
+            ctx.stroke()
+            ctx.shadowBlur = 0
+          } else if (usePowerupIcon) {
             const iconSize = PELLET_RADIUS * 3.8 * sizeMult
             const half = iconSize / 2
             const x = drawX - half
@@ -571,7 +636,7 @@ export function SlitherView({ state, onMouseMove, playerDeadSnake, deathAnimatio
             ctx.fillStyle = powerUpStyle.iconColor ?? powerUpStyle.shadowColor
             ctx.fillRect(x, y, iconSize, iconSize)
             ctx.globalCompositeOperation = 'source-over'
-          } else {
+          } else if (!isGolden && !isTrail) {
             const highlightOffset = r * ORB_HIGHLIGHT_OFFSET
             const cx = drawX - highlightOffset
             const cy = drawY - highlightOffset
@@ -670,6 +735,19 @@ export function SlitherView({ state, onMouseMove, playerDeadSnake, deathAnimatio
             ? toroidalDrawPositions(head.x, head.y, bounds)
             : [[head.x, head.y]]
         for (const [hx, hy] of headPositions) {
+          if (isPlayerBoost) {
+            const bp = 0.5 + 0.5 * Math.sin(speedBoostProgress * Math.PI * 8)
+            ctx.save()
+            ctx.shadowColor = 'rgba(255, 230, 120, 0.9)'
+            ctx.shadowBlur = (18 + bp * 14) / scale
+            ctx.beginPath()
+            ctx.arc(hx, hy, HEAD_RADIUS + 3 / scale, 0, Math.PI * 2)
+            ctx.strokeStyle = `rgba(255, 220, 100, ${0.35 + bp * 0.35})`
+            ctx.lineWidth = 3 / scale
+            ctx.stroke()
+            ctx.shadowBlur = 0
+            ctx.restore()
+          }
           ctx.beginPath()
           ctx.arc(hx, hy, HEAD_RADIUS, 0, Math.PI * 2)
           ctx.fill()
@@ -727,10 +805,23 @@ export function SlitherView({ state, onMouseMove, playerDeadSnake, deathAnimatio
       mCtx.strokeRect(mOx, mOy, bounds.width * mScale, bounds.height * mScale)
       mCtx.lineWidth = 10
       for (const p of pellets) {
-        mCtx.fillStyle = 'rgba(255, 200, 60, 0.9)'
-        mCtx.beginPath()
-        mCtx.arc(mOx + p.x * mScale, mOy + p.y * mScale, 1, 0, Math.PI * 2)
-        mCtx.fill()
+        const pt = p.type ?? 'normal'
+        if (pt === 'golden') {
+          mCtx.fillStyle = 'rgba(255, 220, 80, 1)'
+          mCtx.beginPath()
+          mCtx.arc(mOx + p.x * mScale, mOy + p.y * mScale, 2.2, 0, Math.PI * 2)
+          mCtx.fill()
+        } else if (pt === 'trail') {
+          mCtx.fillStyle = 'rgba(120, 200, 255, 0.75)'
+          mCtx.beginPath()
+          mCtx.arc(mOx + p.x * mScale, mOy + p.y * mScale, 0.7, 0, Math.PI * 2)
+          mCtx.fill()
+        } else {
+          mCtx.fillStyle = 'rgba(255, 200, 60, 0.9)'
+          mCtx.beginPath()
+          mCtx.arc(mOx + p.x * mScale, mOy + p.y * mScale, 1, 0, Math.PI * 2)
+          mCtx.fill()
+        }
       }
       for (const snake of snakes) {
         const head = snake.segments[0]
@@ -758,7 +849,34 @@ export function SlitherView({ state, onMouseMove, playerDeadSnake, deathAnimatio
       mCtx.lineWidth = 1
       mCtx.strokeRect(vx, vy, vw * mScale, vh * mScale)
     }
-  }, [state, state?.bounds, resizeTick, playerDeadSnake, deathAnimationProgress, botDeadSnakes, deathAnimMs, speedBoostActive, speedBoostProgress, powerupImagesReady])
+  }, [
+    state,
+    state?.bounds,
+    resizeTick,
+    playerDeadSnake,
+    deathAnimationProgress,
+    botDeadSnakes,
+    deathAnimMs,
+    speedBoostActive,
+    speedBoostProgress,
+    powerupImagesReady,
+    cameraShakeX,
+    cameraShakeY,
+  ])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas || !onCanvasBoost) return
+    const onDown = (e) => {
+      if (e.button === 0) onCanvasBoost()
+    }
+    canvas.addEventListener('mousedown', onDown)
+    canvas.addEventListener('touchstart', onDown, { passive: true })
+    return () => {
+      canvas.removeEventListener('mousedown', onDown)
+      canvas.removeEventListener('touchstart', onDown)
+    }
+  }, [onCanvasBoost])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -780,7 +898,11 @@ export function SlitherView({ state, onMouseMove, playerDeadSnake, deathAnimatio
 
   return (
     <div ref={wrapRef} className="slither-canvas-wrap">
-      <canvas ref={canvasRef} className="slither-canvas" aria-label="Slither game view" />
+      <canvas
+        ref={canvasRef}
+        className="slither-canvas"
+        aria-label="Slither game view. Click to speed boost."
+      />
       <div className="slither-minimap-wrap">
         <canvas
           ref={minimapRef}
