@@ -33,7 +33,7 @@ export const MAGNET_DURATION = 5
 /** Magnet radius multiplier when super-magnet power-up is active. */
 export const SUPER_MAGNET_MULTIPLIER = 2
 /** Segments shed per second while boosting (Slither.io-style mass trail). */
-export const BOOST_SHED_SEGMENTS_PER_SEC = 7
+export const BOOST_SHED_SEGMENTS_PER_SEC = 4
 /** Do not shrink player below this many segments while boosting. */
 export const MIN_PLAYER_SEGMENTS_FOR_BOOST_DRAIN = 42
 /** Rare high-value pellet (like Slither “special” food). */
