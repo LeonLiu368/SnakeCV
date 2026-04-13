@@ -16,7 +16,6 @@ const BOOST_BASE_DURATION_MS = 2000
 const BOOST_DURATION_PER_SCORE_MS = 50
 const BOOST_SPEED_MULTIPLIER = 1.62
 const BOOST_COOLDOWN_MS = 5000
-const CALIBRATION_DELAY_SEC = 2
 const ELIMINATION_TOAST_MS = 2200
 
 function normalizeAngle(a) {
@@ -30,7 +29,9 @@ export function SlitherPage() {
   const stateRef = useRef(state)
   stateRef.current = state
   const [running, setRunning] = useState(false)
-  const [calibrationCountdown, setCalibrationCountdown] = useState(CALIBRATION_DELAY_SEC)
+  const runningRef = useRef(false)
+  runningRef.current = running
+  const hasStartedOnce = useRef(false)
   const lastTime = useRef(performance.now() / 1000)
   const playerMouseWorld = useRef(null)
   const playerTurn = useRef(0)
@@ -59,6 +60,7 @@ export function SlitherPage() {
   }, [])
 
   const tryStartBoost = useCallback(() => {
+    if (!runningRef.current) return
     const now = Date.now()
     if (speedBoostCooldownEndTimeRef.current != null && now < speedBoostCooldownEndTimeRef.current) return
     if (speedBoostEndTimeRef.current != null && now < speedBoostEndTimeRef.current) return
@@ -102,19 +104,11 @@ export function SlitherPage() {
     headRecalibrate()
   }, [headRecalibrate])
 
-  useEffect(() => {
-    if (calibrationCountdown == null || calibrationCountdown <= 0) return
-    const id = setInterval(() => {
-      setCalibrationCountdown((prev) => {
-        if (prev == null || prev <= 1) {
-          setRunning(true)
-          return null
-        }
-        return prev - 1
-      })
-    }, 1000)
-    return () => clearInterval(id)
-  }, [calibrationCountdown])
+  const handlePlay = useCallback(() => {
+    hasStartedOnce.current = true
+    lastTime.current = performance.now() / 1000
+    setRunning(true)
+  }, [])
 
   const handleMouseMove = useCallback((worldX, worldY) => {
     playerMouseWorld.current = { x: worldX, y: worldY }
@@ -323,7 +317,6 @@ export function SlitherPage() {
     lastTime.current = performance.now() / 1000
     headRecalibrate()
     setRunning(false)
-    setCalibrationCountdown(CALIBRATION_DELAY_SEC)
   }, [headRecalibrate])
 
   const leaderboard = [...state.snakes]
@@ -376,10 +369,16 @@ export function SlitherPage() {
             <button
               type="button"
               className="ghost"
-              onClick={() => setRunning((r) => !r)}
+              onClick={() => {
+                if (!running && !hasStartedOnce.current) {
+                  handlePlay()
+                } else {
+                  setRunning((r) => !r)
+                }
+              }}
               aria-pressed={!running}
             >
-              {running ? 'Pause' : 'Resume'}
+              {running ? 'Pause' : hasStartedOnce.current ? 'Resume' : 'Play'}
             </button>
             <button type="button" className="ghost" onClick={headRecalibrate}>
               Recalibrate
@@ -520,18 +519,32 @@ export function SlitherPage() {
             {killToast.text}
           </div>
         ) : null}
-        {calibrationCountdown != null && calibrationCountdown > 0 ? (
+        {!running && !gameOver && !showWinOverlay ? (
           <div
             className="slither-calibration-overlay"
             role="status"
             aria-live="polite"
-            aria-label="Calibrating"
+            aria-label={faceEnabled && isCalibrating ? 'Calibrating' : 'Ready to play'}
           >
             <div className="slither-calibration-content">
-              <p className="slither-calibration-text">Calibrating…</p>
-              <p className="slither-calibration-countdown">
-                Game starts in {calibrationCountdown}s
-              </p>
+              {faceEnabled && isCalibrating ? (
+                <>
+                  <p className="slither-calibration-text">Calibrating…</p>
+                  <p className="slither-calibration-countdown">
+                    Look at the camera and hold still
+                  </p>
+                </>
+              ) : (
+                <p className="slither-calibration-text">Ready</p>
+              )}
+              <button
+                type="button"
+                className="primary slither-play-cta"
+                disabled={faceEnabled && isCalibrating}
+                onClick={handlePlay}
+              >
+                Play
+              </button>
             </div>
           </div>
         ) : null}

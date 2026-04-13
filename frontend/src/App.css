@@ -694,6 +694,17 @@ body {
   margin: 0;
 }
 
+.slither-play-cta {
+  margin-top: var(--space-sm);
+  min-width: 120px;
+  font-size: 1.1rem;
+}
+
+.slither-play-cta:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .slither-game-over-overlay {
   position: absolute;
   inset: 0;
